@@ -653,10 +653,33 @@ func resourceAwsRedshiftClusterUpdate(d *schema.ResourceData, meta interface{}) 
 	req := &redshift.ModifyClusterInput{
 		ClusterIdentifier: aws.String(d.Id()),
 	}
-
+	
+	// If only the numberOfNodes has changed, attempt an elastic resize
+	if d.HasChange("number_of_nodes") {
+		elasticResizeCompatible := map[string]bool {
+                         "dc2.large": true,
+                         "dc2.8xlarge": true,
+                         "ds2.xlarge": true,
+                         "ds2.8xlarge": true,
+                }
+		req.ClusterType = aws.String(d.Get("cluster_type").(string))
+		req.NodeType = aws.String(d.Get("node_type").(string))
+		if v := d.Get("number_of_nodes").(int); v > 1 {
+			req.ClusterType = aws.String("multi-node")
+			req.NumberOfNodes = aws.Int64(int64(d.Get("number_of_nodes").(int)))
+		} else {
+			req.ClusterType = aws.String("single-node")
+		}
+		if elasticResizeCompatible[req.NumberOfNodes] {
+			elasticResize = true
+		} else {
+			requestUpdate = true
+                }
+	}
+	
 	// If the cluster type, node type, or number of nodes changed, then the AWS API expects all three
 	// items to be sent over
-	if d.HasChange("cluster_type") || d.HasChange("node_type") || d.HasChange("number_of_nodes") {
+	if d.HasChange("cluster_type") || d.HasChange("node_type") {
 		req.ClusterType = aws.String(d.Get("cluster_type").(string))
 		req.NodeType = aws.String(d.Get("node_type").(string))
 		if v := d.Get("number_of_nodes").(int); v > 1 {
@@ -734,6 +757,13 @@ func resourceAwsRedshiftClusterUpdate(d *schema.ResourceData, meta interface{}) 
 		_, err := conn.ModifyCluster(req)
 		if err != nil {
 			return fmt.Errorf("Error modifying Redshift Cluster (%s): %s", d.Id(), err)
+		}
+	} else if elasticResize {
+		log.Printf("[INFO] Elastic Resize Redshift Cluster: %s", d.Id())
+		log.Printf("[DEBUG] Redshift Cluster Elastic Resize options: %s", req)
+		_, err := conn.ResizeCluster(req)
+		if err != nil {
+			return fmt.Errorf("Error resizing Redshift Cluster (%s): %s", d.Id(), err)
 		}
 	}
 
