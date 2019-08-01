@@ -670,7 +670,7 @@ func resourceAwsRedshiftClusterUpdate(d *schema.ResourceData, meta interface{}) 
 		} else {
 			req.ClusterType = aws.String("single-node")
 		}
-		if elasticResizeCompatible[req.NumberOfNodes] {
+		if elasticResizeCompatible[req.NodeType] {
 			elasticResize = true
 		} else {
 			requestUpdate = true
