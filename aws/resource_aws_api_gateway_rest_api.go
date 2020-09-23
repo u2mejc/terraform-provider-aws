@@ -1,6 +1,7 @@
 package aws
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/structure"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	"github.com/terraform-providers/terraform-provider-aws/aws/internal/keyvaluetags"
+	"gopkg.in/yaml.v2"
 )
 
 func resourceAwsApiGatewayRestApi() *schema.Resource {
@@ -410,12 +412,31 @@ func resourceAwsApiGatewayRestApiUpdate(d *schema.ResourceData, meta interface{}
 	}
 
 	if d.HasChange("body") {
-		if body, ok := d.GetOk("body"); ok {
+		if body, BodyOk := d.GetOk("body"); BodyOk {
 			log.Printf("[DEBUG] Updating API Gateway from OpenAPI spec: %s", d.Id())
-			_, err := conn.PutRestApi(&apigateway.PutRestApiInput{
+			var MergedBody map[string]interface{}
+			if YamlBody, _ := checkYamlString(body); YamlBody != "" {
+				err := yaml.Unmarshal([]byte(fmt.Sprint(body)), &MergedBody)
+				if err != nil {
+					return fmt.Errorf("error unmarshalling yaml body: %s", err)
+				}
+			} else {
+				json.Unmarshal([]byte(fmt.Sprint(body)), &MergedBody)
+			}
+
+			if policy, PolicyOk := d.GetOk("policy"); PolicyOk {
+				json.Unmarshal([]byte(fmt.Sprint(policy)), &MergedBody)
+			}
+
+			jsonString, err := json.Marshal(fmt.Sprint(MergedBody))
+			if err != nil {
+				return fmt.Errorf("error merging body and policy json: %s", err)
+			}
+
+			_, err = conn.PutRestApi(&apigateway.PutRestApiInput{
 				RestApiId: aws.String(d.Id()),
 				Mode:      aws.String(apigateway.PutModeOverwrite),
-				Body:      []byte(body.(string)),
+				Body:      []byte(jsonString),
 			})
 			if err != nil {
 				return fmt.Errorf("error updating API Gateway specification: %s", err)
